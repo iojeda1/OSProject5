@@ -85,11 +85,52 @@ void page_fault_handler( struct page_table *pt, int page )
                     break;  
                 }
             }
-        } else {
+        } else if (strcmp(algo, "custom")== 0) { 
+		int found = 0;
+        	int scanned = 0;
+		int rounds = 0;
+		int max_scans = 2 * nframesg;
+		
+		while (!found && scanned < max_scans) {
+			int c_page = frame_table[hand];
+        		int c_bits;
+        		int temp_frame;
+        		page_table_get_entry(pt, c_page, &temp_frame, &c_bits);
+
+        		int is_ref = c_bits & BIT_REF;
+        		int is_dirty = c_bits & BIT_DIRTY;
+
+			scanned++;
+			hand = (hand + 1) % nframesg;
+
+        	// First pass: evict clean unreferenced
+        	if (rounds == 0 && !is_ref && !is_dirty) {
+            		victim = hand;
+            		page_victim = c_page;
+            		found = 1;
+        	}
+        	// Second pass: fallback to regular clock
+        	else if (rounds == 1 && !is_ref) {
+            		victim = hand;
+            		page_victim = c_page;
+            		found = 1;
+        	} else {
+                // Clear REF bit and continue
+            		page_table_set_entry(pt, c_page, temp_frame, c_bits & ~BIT_REF);
+            		hand = (hand + 1) % nframesg;
+        	}
+
+        	// If we finished one full pass and didn't find a clean page, try round 2
+        	if (!found && hand == 0) {
+            		rounds++;
+        	}
+    	    }
+
+	} else {
             fprintf(stderr, "Error: unknown algorithm \n");
             exit(1); 
         }    
-        if (page_victim != -1) { 
+	if (page_victim != -1) { 
             int bits_victim; 
             int temp_frame; 
             page_table_get_entry(pt,page_victim,&temp_frame,&bits_victim);
@@ -133,7 +174,6 @@ int main( int argc, char *argv[] )
 		fprintf(stderr,"couldn't create page table: %s\n",strerror(errno));
 		return 1;
 	}
-
 	physmem = page_table_get_physmem(pt);
 	virtmem = page_table_get_virtmem(pt);
 	
@@ -174,9 +214,8 @@ int main( int argc, char *argv[] )
     free(frame_table);
     free(frame_page);
     free(algo);
+    page_table_delete(pt);
+    disk_close(disk);
 
-	page_table_delete(pt);
-	disk_close(disk);
-
-	return 0;
+    return 0;
 }
